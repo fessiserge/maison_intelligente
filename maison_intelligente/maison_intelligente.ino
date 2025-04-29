@@ -1,6 +1,9 @@
 #include <HCSR04.h>
 #include <LCD_I2C.h>
 #include <AccelStepper.h>
+#include <AccelStepper.h>
+#include <U8g2lib.h>
+
 
 #define TRIGGER_PIN 11
 #define ECHO_PIN 12
@@ -14,9 +17,18 @@
 #define IN_3 43
 #define IN_4 45
 
+#define CLK_PIN 35
+#define DIN_PIN 31
+#define CS_PIN 33
+
+
 HCSR04 hc(TRIGGER_PIN, ECHO_PIN);
 LCD_I2C lcd(0x27, 16, 2);
 AccelStepper myStepper(MOTOR_INTERFACE_TYPE, IN_1, IN_3, IN_2, IN_4);
+U8G2_MAX7219_8X8_F_4W_SW_SPI u8g2(U8G2_R0, CLK_PIN, DIN_PIN, CS_PIN, U8X8_PIN_NONE, U8X8_PIN_NONE);
+
+
+
 
 const char* DA = "2405238";
 unsigned long currentTime = 0;
@@ -37,6 +49,11 @@ const int DISPLAY_INTERVAL = 100;
 const int DISTANCE_INTERVAL = 50;
 const int SERIAL_INTERVAL = 100;
 const int DOOR_MOVE_INTERVAL = 2000;
+int alertDistance = 15; 
+const int maxRawDist = 400; 
+const int minRawDist = 0;  
+const int screenDelayTime = 3000;
+
 
 enum Etat {
   FERMEE,
@@ -66,16 +83,24 @@ void setup() {
   myStepper.enableOutputs();
 
   departureDisplay();
+  u8g2.begin();
+  u8g2.setFont(u8g2_font_4x6_tr);  
+  u8g2.setContrast(5);             
+
+
+  
 }
 
 void loop() {
   currentTime = millis();
   distance = distanceTask(currentTime);
   stateManager();
+  
   alertManager(currentTime);
   motorTask();
   screenDisplay(currentTime);
-  serialPrint(currentTime);
+  //serialPrint(currentTime);
+  commandGestion();
 }
 
 float distanceTask(unsigned long ct) {
@@ -226,7 +251,97 @@ void screenDisplay(unsigned long ct) {
   }
 }
 
-void serialPrint(unsigned long ct) {
+void confirm() {
+  unsigned long start = millis();
+  while (millis() - start < screenDelayTime) {
+    u8g2.clearBuffer();
+    u8g2.drawLine(1, 5, 3, 7);
+    u8g2.drawLine(3, 7, 7, 1);
+    u8g2.sendBuffer();
+  }
+  u8g2.clear();
+}
+
+void error() {
+  unsigned long start = millis();
+  while (millis() - start < screenDelayTime) {
+    u8g2.clearBuffer();
+    u8g2.drawCircle(3, 3, 3);
+    u8g2.drawLine(0, 0, 7, 7);
+    u8g2.sendBuffer();
+  }
+  u8g2.clear();
+}
+
+void inconnu() {
+  unsigned long start = millis();
+  while (millis() - start < screenDelayTime) {
+    u8g2.clearBuffer();
+    u8g2.drawLine(7, 7, 0, 0);
+    u8g2.drawLine(0, 7, 7, 0);
+    u8g2.sendBuffer();
+  }
+  u8g2.clear();
+}
+
+void commandGestion() {
+  if (!Serial.available()) return;
+  String command = Serial.readStringUntil('\n');
+  command.trim();
+  command.toLowerCase();
+
+  if (command == "g_dist") {
+    Serial.print("Arduino: ");
+    Serial.println(distance);
+    confirm();
+  } 
+  else if (command.startsWith("cfg;alm;")) {
+    int valeur = command.substring(8).toInt();
+    if (valeur > 0) {
+      alertDistance = valeur;
+      Serial.print("Distance d'alarme configurée à ");
+      Serial.print(valeur);
+      Serial.println(" cm");
+      confirm();
+    } else {
+      error();
+    }
+  } 
+  else if (command.startsWith("cfg;lim_inf;")) {
+    int valeur = command.substring(12).toInt();
+    if (valeur < maxAngle) {
+      minAngle = valeur;
+      minStep = (minAngle * 2038.0) / 360;
+      Serial.print("Limite inférieure configurée à ");
+      Serial.print(valeur);
+      Serial.println(" degrés");
+      confirm();
+    } else {
+      error();
+    }
+  } 
+  else if (command.startsWith("cfg;lim_sup;")) {
+    int valeur = command.substring(12).toInt();
+    if (valeur > minAngle) {
+      maxAngle = valeur;
+      maxStep = (maxAngle * 2038.0) / 360;
+      Serial.print("Limite supérieure configurée à ");
+      Serial.print(valeur);
+      Serial.println(" degrés");
+      confirm();
+    } else {
+      error();
+    }
+  } 
+  else {
+    inconnu();
+  }
+}
+
+
+
+
+/*void serialPrint(unsigned long ct) {
   static unsigned long previousSerial = 0;
 
   if (ct - previousSerial >= SERIAL_INTERVAL) {
@@ -239,4 +354,4 @@ void serialPrint(unsigned long ct) {
 
     previousSerial = ct;
   }
-}
+}*/
